@@ -1,0 +1,61 @@
+name: Sync Tencent Docs Data
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */4 * * *'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install openpyxl
+
+      - name: Export Tencent Docs
+        id: export
+        run: |
+          RESP=$(curl -s -X POST 'https://docs.qq.com/openapi/mcp' \
+            -H "Authorization: ${{ secrets.TDOCS_AUTH }}" \
+            -H "X-MCP-Request-Sign: ${{ secrets.TDOCS_SIGN }}" \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"manage.export_file","arguments":{"file_id":"${{ secrets.TDOCS_FILE_ID }}"}},"id":1}')
+          TASK_ID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['structuredContent']['task_id'])")
+          echo "Task ID: $TASK_ID"
+
+          for i in $(seq 1 6); do
+            sleep 5
+            PROG=$(curl -s -X POST 'https://docs.qq.com/openapi/mcp' \
+              -H "Authorization: ${{ secrets.TDOCS_AUTH }}" \
+              -H "X-MCP-Request-Sign: ${{ secrets.TDOCS_SIGN }}" \
+              -H 'Content-Type: application/json' \
+              -H 'Accept: application/json, text/event-stream' \
+              -d "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"manage.export_progress\",\"arguments\":{\"task_id\":\"$TASK_ID\"}},\"id\":2}")
+            PROGRESS=$(echo "$PROG" | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['structuredContent'].get('progress',0))")
+            echo "Progress: $PROGRESS%"
+            if [ "$PROGRESS" = "100" ]; then
+              FILE_URL=$(echo "$PROG" | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['structuredContent']['file_url'])")
+              echo "file_url=$FILE_URL" >> $GITHUB_OUTPUT
+              break
+            fi
+          done
+
+          if [ -z "$FILE_URL" ]; then
+            echo "Export timed out"
+            exit 1
+          fi
+
+      - name: Download and parse data
+        run: |
+          # ... (full workflow continues as in the file)
