@@ -167,7 +167,7 @@ th,td{padding:6px 8px;font-size:12px}
 <div class="header-left"><div class="logo">九峰牧场<span>·</span>数据看板</div><div class="badge">BETA</div></div>
 <div class="header-right">
 <span class="last-update" id="lastUpdate">📡 数据来源：腾讯文档「九峰615」 | 最后更新：2026-06-14 | 共 5516 条</span>
-<button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+<button class="upload-btn" onclick="syncFromCloud()" id="syncBtn" title="从云端同步最新数据">
 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
 更新数据</button>
 
@@ -951,6 +951,53 @@ function restoreContainer() {
   const ov = document.getElementById('emptyOverlay');
   if (ov) ov.remove();
   document.querySelectorAll('.container .card').forEach(c => c.style.display = '');
+}
+
+// Sync data from data.json (same-origin, no CORS issue)
+async function syncFromCloud() {
+  const btn = document.getElementById('syncBtn');
+  const origText = btn.innerHTML;
+  btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin .8s linear infinite"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> 同步中…';
+  btn.disabled = true;
+  showLoading();
+  restoreContainer();
+  try {
+    const resp = await fetch('data.json', {cache:'no-store'});
+    if (!resp.ok) throw new Error('HTTP '+resp.status);
+    const json = await resp.json();
+    if (!json.data || !json.data.length) throw new Error('数据为空');
+    allData = json.data;
+    const udates = [...new Set(allData.map(d=>d['日期']))].sort();
+    const uchan = [...new Set(allData.map(d=>d['渠道']))].sort();
+    const usub = [...new Set(allData.map(d=>d['细分渠道']))].sort();
+    document.getElementById('lastUpdate').textContent = '📡 数据来源：腾讯文档「九峰615」 | 最后更新：'+json.lastUpdate+' | 共 '+json.totalRows+' 条';
+    // Rebuild selects
+    let chOpts = '<option value="all">全部渠道</option>';
+    uchan.forEach(c=>{chOpts+='<option value="'+c+'">'+c+'</option>';});
+    document.getElementById('chanSelect').innerHTML = chOpts;
+    let subOpts = '<option value="all">全部细分渠道</option>';
+    usub.forEach(s=>{subOpts+='<option value="'+s+'">'+s+'</option>';});
+    document.getElementById('subChanSelect').innerHTML = subOpts;
+    let cmpChOpts = '<option value="all">全部渠道</option>';
+    uchan.forEach(c=>{cmpChOpts+='<option value="'+c+'">'+c+'</option>';});
+    document.getElementById('cmpChan').innerHTML = cmpChOpts;
+    document.getElementById('cmpSubChan').innerHTML = '<option value="all">全部细分渠道</option>';
+    timeFilter='all'; chanFilter='all'; subChanFilter='all';
+    document.querySelectorAll('.filter-bar .filter-pill').forEach(p=>p.classList.remove('active'));
+    document.querySelector('[data-filter="all"]').classList.add('active');
+    document.getElementById('chanSelect').value='all';
+    document.getElementById('subChanSelect').value='all';
+    destroyCharts();
+    renderAll();
+    hideLoading();
+    showToast('✅ 已同步！共 '+allData.length+' 条，最新日期 '+udates[udates.length-1]+' | ⏱ 下次同步请先触发 GitHub Actions');
+  } catch(e) {
+    hideLoading();
+    showToast('⚠️ 同步失败：'+e.message+' — 请尝试手动上传 xlsx 文件');
+    console.error(e);
+  }
+  btn.innerHTML = origText;
+  btn.disabled = false;
 }
 
 function handleFileUpload(input) {
